@@ -6,7 +6,10 @@
 <link rel="icon" href="data:,">
 <title>EMBERLINE — Tactical FPS</title>
 <style>
-  /* Look plan: dusk foundry. Every colour below is one of the six; lighting makes the rest. */
+  /* Look plan: dusk foundry. Every colour below is one of the six; lighting makes the rest.
+     Polish rules: every readout sits on a soft dark plate with a hairline edge and a text
+     shadow, so the HUD stays readable over the brightest ember in the scene; motion is
+     short and physical — a hit pops, money pulses once, a banner settles. */
   :root {
     --canvas: #17130f;
     --surface: #221c16;
@@ -20,6 +23,8 @@
     --radius-control: 8px;
     --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
     --font-readout: ui-monospace, 'SF Mono', Menlo, monospace;
+    --plate: color-mix(in srgb, var(--canvas) 74%, transparent);
+    --shadow-text: 0 1px 3px rgba(10, 6, 3, 0.85), 0 0 12px rgba(10, 6, 3, 0.45);
   }
   * { box-sizing: border-box; }
   html, body {
@@ -36,153 +41,191 @@
 
   #vignette {
     position: fixed; inset: 0; pointer-events: none; opacity: 0;
-    background: radial-gradient(ellipse at center, transparent 52%, rgba(229, 72, 77, 0.55) 100%);
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(229, 72, 77, 0.6) 100%);
     transition: opacity 120ms linear;
   }
   #vignette.on { opacity: 1; }
 
-  #crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); }
-  #crosshair i { position: absolute; background: var(--ink); opacity: .9; }
+  /* Crosshair: four ticks around a centre dot; --gap is driven by the live spread. */
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); filter: drop-shadow(0 1px 2px rgba(10, 6, 3, 0.9)); }
+  #crosshair i { position: absolute; background: var(--ink); opacity: .92; }
   #crosshair i:nth-child(1) { left: 10px; top: 0; width: 2px; height: 7px; }
   #crosshair i:nth-child(2) { left: 10px; bottom: 0; width: 2px; height: 7px; }
   #crosshair i:nth-child(3) { top: 10px; left: 0; height: 2px; width: 7px; }
   #crosshair i:nth-child(4) { top: 10px; right: 0; height: 2px; width: 7px; }
+  #crosshair::after {
+    content: ''; position: absolute; left: 50%; top: 50%; width: 2px; height: 2px;
+    transform: translate(-50%, -50%); background: var(--accent); border-radius: 50%;
+  }
 
-  #hitmarker { position: fixed; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%) rotate(45deg); opacity: 0; transition: opacity 90ms linear; }
-  #hitmarker.on { opacity: 1; }
-  #hitmarker i { position: absolute; background: var(--accent); }
-  #hitmarker i:nth-child(1) { left: 12px; top: 0; width: 2px; height: 8px; }
-  #hitmarker i:nth-child(2) { left: 12px; bottom: 0; width: 2px; height: 8px; }
-  #hitmarker i:nth-child(3) { top: 12px; left: 0; height: 2px; width: 8px; }
-  #hitmarker i:nth-child(4) { top: 12px; right: 0; height: 2px; width: 8px; }
-  #hitmarker.kill i { background: var(--danger); }
+  /* Hitmarker: an X that pops in at 1.25x and settles; a kill turns it danger-red and
+     holds it a beat longer (hud.js drives the timing). */
+  #hitmarker { position: fixed; left: 50%; top: 50%; width: 28px; height: 28px; transform: translate(-50%, -50%) rotate(45deg) scale(1.25); opacity: 0; transition: opacity 90ms linear, transform 90ms ease-out; }
+  #hitmarker.on { opacity: 1; transform: translate(-50%, -50%) rotate(45deg) scale(1); }
+  #hitmarker i { position: absolute; background: var(--accent); box-shadow: 0 0 6px rgba(255, 122, 26, 0.8); }
+  #hitmarker i:nth-child(1) { left: 13px; top: 0; width: 2px; height: 9px; }
+  #hitmarker i:nth-child(2) { left: 13px; bottom: 0; width: 2px; height: 9px; }
+  #hitmarker i:nth-child(3) { top: 13px; left: 0; height: 2px; width: 9px; }
+  #hitmarker i:nth-child(4) { top: 13px; right: 0; height: 2px; width: 9px; }
+  #hitmarker.kill i { background: var(--danger); box-shadow: 0 0 8px rgba(229, 72, 77, 0.9); }
 
   #ammo {
     position: fixed; right: 32px; bottom: 24px;
     display: flex; align-items: baseline; gap: 8px;
     font-family: var(--font-readout); font-size: 56px; line-height: 1; letter-spacing: -0.03em;
+    text-shadow: var(--shadow-text);
   }
+  #ammo.low #ammo-mag { color: var(--ally); }
   #ammo.empty #ammo-mag { color: var(--accent); }
   #ammo-reserve { font-size: 16px; color: var(--muted); }
-  #weapon-name { position: fixed; right: 32px; bottom: 92px; font-family: var(--font-readout); font-size: 13px; color: var(--muted); text-align: right; }
-  #grenades { position: fixed; right: 32px; bottom: 116px; font-family: var(--font-readout); font-size: 13px; color: var(--muted); text-align: right; }
+  #weapon-name { position: fixed; right: 32px; bottom: 92px; font-family: var(--font-readout); font-size: 13px; letter-spacing: 0.08em; color: var(--ink); text-align: right; text-shadow: var(--shadow-text); }
+  #grenades { position: fixed; right: 32px; bottom: 116px; font-family: var(--font-readout); font-size: 13px; color: var(--muted); text-align: right; text-shadow: var(--shadow-text); }
 
-  #health-block { position: fixed; left: 32px; bottom: 24px; width: 220px; }
+  #health-block { position: fixed; left: 32px; bottom: 24px; width: 220px; text-shadow: var(--shadow-text); }
   #health-row { display: flex; align-items: baseline; gap: 10px; font-family: var(--font-readout); }
   #health-value { font-size: 40px; line-height: 1; }
   #health-label, #armor-value { font-size: 13px; color: var(--muted); }
-  #health-bar { height: 6px; margin-top: 6px; background: var(--hairline); border-radius: 3px; overflow: hidden; }
-  #health-fill { height: 100%; width: 100%; background: var(--accent); transition: width 120ms linear; }
+  #armor-value { color: var(--ally); }
+  #health-bar { height: 6px; margin-top: 6px; background: var(--hairline); border-radius: 3px; overflow: hidden; box-shadow: 0 1px 3px rgba(10, 6, 3, 0.6); }
+  #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #c75b12, var(--accent)); transition: width 120ms linear; }
   #health-fill.low { background: var(--danger); }
 
   #topbar {
     position: fixed; top: 18px; left: 50%; transform: translateX(-50%);
     display: flex; align-items: center; gap: 14px;
     font-family: var(--font-readout); font-size: 15px;
-    background: color-mix(in srgb, var(--canvas) 72%, transparent);
+    background: var(--plate);
     border: 1px solid var(--hairline); border-radius: var(--radius-panel);
     padding: 8px 16px;
+    backdrop-filter: blur(3px);
+    box-shadow: 0 4px 18px rgba(10, 6, 3, 0.45);
   }
-  #topbar .team-van { color: var(--ally); }
-  #topbar .team-cin { color: var(--danger); }
+  #topbar .team-van, #topbar .team-cin {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
+    padding: 3px 7px; border-radius: 3px; border: 1px solid var(--hairline);
+  }
+  #topbar .team-van { color: var(--ally); border-color: color-mix(in srgb, var(--ally) 45%, transparent); }
+  #topbar .team-cin { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
   #topbar .score { font-size: 20px; font-weight: 700; }
   #timer { min-width: 52px; text-align: center; font-size: 18px; }
-  #timer.low { color: var(--danger); }
-  #round-label { font-size: 12px; color: var(--muted); }
+  #timer.low { color: var(--danger); animation: timer-pulse 1s ease-in-out infinite; }
+  @keyframes timer-pulse { 50% { opacity: 0.55; } }
+  #round-label { font-size: 12px; color: var(--muted); letter-spacing: 0.06em; }
   #alive { font-size: 12px; color: var(--muted); }
 
-  #money { position: fixed; left: 32px; top: 18px; font-family: var(--font-readout); font-size: 15px; color: var(--accent); }
+  #money { position: fixed; left: 32px; top: 18px; font-family: var(--font-readout); font-size: 17px; color: var(--accent); text-shadow: var(--shadow-text); }
   #money small { color: var(--muted); font-size: 12px; }
-  #objective { position: fixed; left: 32px; top: 44px; font-size: 13px; color: var(--muted); max-width: 300px; line-height: 1.4; }
+  #money.gain { animation: money-gain 620ms ease-out; }
+  @keyframes money-gain {
+    0% { transform: scale(1.14); }
+    100% { transform: scale(1); }
+  }
+  #objective { position: fixed; left: 32px; top: 48px; font-size: 13px; color: var(--muted); max-width: 300px; line-height: 1.45; text-shadow: var(--shadow-text); }
 
   #killfeed { position: fixed; right: 32px; top: 18px; display: grid; gap: 4px; justify-items: end; font-family: var(--font-readout); font-size: 13px; }
-  #killfeed div { background: color-mix(in srgb, var(--canvas) 72%, transparent); border: 1px solid var(--hairline); border-radius: var(--radius-panel); padding: 4px 8px; }
+  #killfeed div { background: var(--plate); border: 1px solid var(--hairline); border-radius: var(--radius-panel); padding: 4px 9px; animation: feed-in 160ms ease-out; }
+  @keyframes feed-in { from { opacity: 0; transform: translateX(8px); } }
   #killfeed .van { color: var(--ally); }
   #killfeed .cin { color: var(--danger); }
-  #killfeed .headshot { color: var(--accent); }
+  #killfeed .glyph { color: var(--accent); }
+  #killfeed .headshot-line { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 
   #bomb-status {
     position: fixed; left: 50%; top: 76px; transform: translateX(-50%);
-    font-family: var(--font-readout); font-size: 13px; color: var(--accent);
-    background: color-mix(in srgb, var(--canvas) 72%, transparent);
-    border: 1px solid var(--hairline); border-radius: var(--radius-panel);
+    font-family: var(--font-readout); font-size: 13px; letter-spacing: 0.05em; color: var(--accent);
+    background: var(--plate);
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); border-radius: var(--radius-panel);
     padding: 6px 12px; display: none;
   }
   #bomb-status.show { display: block; }
   #plant-bar { position: fixed; left: 50%; top: 50%; transform: translate(-50%, 84px); width: 220px; display: none; }
   #plant-bar.show { display: block; }
-  #plant-bar .label { text-align: center; font-size: 12px; color: var(--ink); margin-bottom: 4px; font-family: var(--font-readout); }
-  #plant-bar .track { height: 6px; background: var(--hairline); border-radius: 3px; overflow: hidden; }
-  #plant-bar .fill { height: 100%; width: 0%; background: var(--accent); }
+  #plant-bar .label { text-align: center; font-size: 12px; letter-spacing: 0.06em; color: var(--ink); margin-bottom: 5px; font-family: var(--font-readout); text-shadow: var(--shadow-text); }
+  #plant-bar .track { height: 6px; background: var(--hairline); border-radius: 3px; overflow: hidden; box-shadow: 0 1px 3px rgba(10, 6, 3, 0.6); }
+  #plant-bar .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #c75b12, var(--accent)); }
 
   #banner {
     position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%);
-    text-align: center; display: none;
+    text-align: center; display: none; text-shadow: var(--shadow-text);
   }
-  #banner.show { display: block; }
-  #banner h2 { margin: 0; font-size: 44px; letter-spacing: -0.02em; font-weight: 600; }
-  #banner p { margin: 8px 0 0; font-size: 16px; color: var(--muted); }
+  #banner.show { display: block; animation: banner-in 300ms ease-out; }
+  @keyframes banner-in { from { opacity: 0; transform: translate(-50%, -46%) scale(1.04); } }
+  #banner h2 { margin: 0; font-size: 46px; letter-spacing: 0.04em; font-weight: 700; }
+  #banner p { margin: 8px 0 0; font-size: 16px; color: var(--ink); opacity: 0.85; }
   #banner.win h2 { color: var(--accent); }
   #banner.lose h2 { color: var(--danger); }
 
-  #hint { position: fixed; left: 50%; bottom: 110px; transform: translateX(-50%); font-size: 13px; color: var(--muted); font-family: var(--font-readout); }
+  #hint { position: fixed; left: 50%; bottom: 110px; transform: translateX(-50%); font-size: 13px; color: var(--muted); font-family: var(--font-readout); text-shadow: var(--shadow-text); }
 
   .overlay {
     position: fixed; inset: 0; display: grid; place-items: center; padding: 24px;
-    background: color-mix(in srgb, var(--canvas) 86%, transparent);
+    background: color-mix(in srgb, var(--canvas) 84%, transparent);
+    backdrop-filter: blur(2px);
   }
   .overlay[hidden] { display: none; }
   .panel {
     width: min(460px, 100%); padding: 32px;
-    background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-panel);
+    background: linear-gradient(165deg, color-mix(in srgb, var(--surface) 92%, #ffffff 4%), var(--surface));
+    border: 1px solid var(--hairline); border-top: 2px solid var(--accent); border-radius: var(--radius-panel);
+    box-shadow: 0 18px 50px rgba(5, 3, 2, 0.6);
   }
-  .panel h1 { margin: 0 0 8px; font-size: 32px; line-height: 1.15; font-weight: 500; letter-spacing: -0.02em; }
-  .panel h1 .ember { color: var(--accent); }
+  .panel h1 { margin: 0 0 8px; font-size: 34px; line-height: 1.15; font-weight: 600; letter-spacing: 0.06em; }
+  .panel h1 .ember { color: var(--accent); text-shadow: 0 0 18px rgba(255, 122, 26, 0.45); }
   .panel p { margin: 0 0 24px; max-width: 46ch; font-size: 16px; line-height: 1.5; color: var(--muted); }
   #play {
-    font: inherit; font-weight: 500; padding: 12px 16px; white-space: nowrap;
+    font: inherit; font-weight: 600; letter-spacing: 0.03em; padding: 12px 18px; white-space: nowrap;
     border: 1px solid var(--accent); border-radius: var(--radius-control);
-    background: var(--accent); color: var(--canvas); cursor: pointer;
+    background: linear-gradient(180deg, #ff8a3d, var(--accent)); color: var(--canvas); cursor: pointer;
+    box-shadow: 0 4px 16px rgba(255, 122, 26, 0.35);
   }
-  #play:hover { background: var(--ink); border-color: var(--ink); }
+  #play:hover { background: var(--ink); border-color: var(--ink); box-shadow: none; }
   #play:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .keys { margin: 24px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 14px; color: var(--muted); }
-  .keys li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .keys { margin: 24px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; font-size: 14px; color: var(--muted); }
+  .keys li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .keys kbd {
-    min-width: 24px; padding: 2px 6px; border: 1px solid var(--hairline);
+    min-width: 24px; padding: 2px 6px; border: 1px solid var(--hairline); border-bottom-width: 2px;
     border-radius: var(--radius-panel); font-family: var(--font-readout); font-size: 12px; color: var(--ink); text-align: center;
+    background: color-mix(in srgb, var(--canvas) 60%, transparent);
   }
 
   #buy-menu {
     position: fixed; inset: 0; display: none; place-items: center; padding: 24px;
     background: color-mix(in srgb, var(--canvas) 78%, transparent);
+    backdrop-filter: blur(2px);
   }
   #buy-menu.show { display: grid; }
   #buy-menu .panel { width: min(560px, 100%); }
-  #buy-menu h2 { margin: 0 0 4px; font-size: 24px; }
+  #buy-menu h2 { margin: 0 0 4px; font-size: 24px; letter-spacing: 0.03em; }
   #buy-menu .sub { margin: 0 0 18px; font-size: 14px; color: var(--muted); }
   #buy-menu .sub b { color: var(--accent); font-family: var(--font-readout); }
   .buy-grid { display: grid; gap: 8px; }
   .buy-item {
     display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
-    padding: 10px 12px; background: transparent; color: var(--ink);
+    padding: 10px 12px; background: color-mix(in srgb, var(--canvas) 45%, transparent); color: var(--ink);
     border: 1px solid var(--hairline); border-radius: var(--radius-panel);
     font: inherit; font-size: 14px; cursor: pointer;
+    transition: border-color 90ms linear, background 90ms linear;
   }
-  .buy-item:hover:not(:disabled) { border-color: var(--accent); }
+  .buy-item:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .buy-item:disabled { opacity: 0.45; cursor: default; }
-  .buy-item .key { font-family: var(--font-readout); color: var(--accent); min-width: 18px; }
-  .buy-item .name { flex: 1; }
+  .buy-item.owned { opacity: 0.65; border-style: dashed; }
+  .buy-item .key {
+    font-family: var(--font-readout); color: var(--canvas); background: var(--accent);
+    min-width: 20px; text-align: center; padding: 2px 0; border-radius: 3px; font-weight: 700;
+  }
+  .buy-item:disabled .key { background: var(--hairline); color: var(--muted); }
+  .buy-item .name { flex: 1; font-weight: 500; }
   .buy-item .desc { color: var(--muted); font-size: 12px; }
   .buy-item .price { font-family: var(--font-readout); color: var(--accent); }
-  .buy-item .owned { font-family: var(--font-readout); color: var(--muted); font-size: 12px; }
+  .buy-item .owned { font-family: var(--font-readout); color: var(--ally); font-size: 12px; letter-spacing: 0.08em; }
   #buy-close { margin-top: 16px; font-size: 13px; color: var(--muted); }
 
-  #death-note { position: fixed; left: 50%; top: 58%; transform: translateX(-50%); font-size: 15px; color: var(--muted); display: none; }
+  #death-note { position: fixed; left: 50%; top: 58%; transform: translateX(-50%); font-size: 15px; color: var(--muted); display: none; text-shadow: var(--shadow-text); }
   #death-note.show { display: block; }
 
   @media (prefers-reduced-motion: reduce) {
-    #hitmarker, #play { transition-duration: 0.01ms; }
+    #hitmarker, #play, #banner.show, #killfeed div, #money.gain { transition-duration: 0.01ms; animation: none; }
+    #timer.low { animation: none; }
   }
 </style>
 </head>

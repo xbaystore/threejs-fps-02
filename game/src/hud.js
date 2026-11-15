@@ -1,7 +1,9 @@
 // The DOM HUD: health, armour, ammo, money, the round timer and score, the kill feed, the
 // buy menu and the round banners. It never touches the simulation; main.js pushes numbers
 // in and reads the play callback out. Every setter is cheap-guarded so the DOM is only
-// written when a value actually changes.
+// written when a value actually changes. The polish lives here and in index.html's CSS:
+// money pulses when it moves, a kill holds its hitmarker longer than a hit, the kill feed
+// names the weapon, and the top bar always says whose round it is.
 import { BUY_ITEMS } from './state.js';
 
 const COPY = {
@@ -25,6 +27,14 @@ const COPY = {
     copy: 'Cinder takes the match. Run it back.',
     action: 'Play again',
   },
+};
+
+// The kill feed's weapon glyphs: one compact mark per way of dying, so a feed line can
+// be read at a glance in a screenshot without a legend.
+const WEAPON_GLYPHS = {
+  headshot: '◉',
+  frag: '✸',
+  gun: '✕',
 };
 
 export function createHud() {
@@ -67,16 +77,19 @@ export function createHud() {
   const objective = $('objective');
 
   let hitTimer = 0;
+  let moneyTimer = 0;
   let lastMag = -1;
   let lastReserve = -1;
   let lastHealth = -1;
   let lastArmor = -1;
   let lastMoney = -1;
   let lastTimer = '';
+  let lastPhase = '';
   let lastScore = '';
   let lastWeapon = '';
   let lastGrenades = '';
   let lastAlive = '';
+  let lastObjective = '';
   let bannerTimer = 0;
 
   const buyButtons = BUY_ITEMS.map((item) => {
@@ -85,7 +98,7 @@ export function createHud() {
     button.className = 'buy-item';
     button.innerHTML = `<span class="key">${item.key}</span><span class="name">${item.name}</span><span class="desc">${item.desc}</span><span class="price">$${item.price}</span>`;
     buyGrid.appendChild(button);
-    return { item, button };
+    return { item, button, tag: button.querySelector('.price') };
   });
 
   return {
@@ -96,6 +109,7 @@ export function createHud() {
       ammoMag.textContent = String(mag);
       ammoReserve.textContent = `/ ${reserve}`;
       ammo.classList.toggle('empty', mag === 0);
+      ammo.classList.toggle('low', mag > 0 && mag <= 5);
     },
     setWeapon(name) {
       if (name === lastWeapon) return;
@@ -119,19 +133,34 @@ export function createHud() {
     },
     setMoney(value) {
       if (value === lastMoney) return;
+      const increased = lastMoney >= 0 && value > lastMoney;
       lastMoney = value;
       moneyEl.innerHTML = `$${value} <small>press B to buy</small>`;
       buyMoney.textContent = `$${value}`;
+      // A reward landing is good news the player should feel: one soft pulse, no noise
+      // when money is spent — spending has its own buy sound.
+      if (increased) {
+        moneyEl.classList.remove('gain');
+        void moneyEl.offsetWidth;
+        moneyEl.classList.add('gain');
+        clearTimeout(moneyTimer);
+        moneyTimer = setTimeout(() => moneyEl.classList.remove('gain'), 650);
+      }
     },
     setTimer(seconds, phase) {
       const total = Math.max(0, Math.ceil(seconds));
       const text = `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-      const label = phase === 'buy' ? 'BUY' : phase === 'live' ? '' : phase;
-      if (text === lastTimer) return;
-      lastTimer = text;
-      timerEl.textContent = text;
-      timerEl.classList.toggle('low', phase === 'live' && total <= 15);
-      roundLabel.textContent = label;
+      if (text !== lastTimer) {
+        lastTimer = text;
+        timerEl.textContent = text;
+        timerEl.classList.toggle('low', phase === 'live' && total <= 15);
+      }
+      if (phase !== lastPhase) {
+        lastPhase = phase;
+        if (phase === 'buy') roundLabel.textContent = 'BUY PHASE';
+        else if (phase === 'roundEnd') roundLabel.textContent = 'ROUND OVER';
+        else if (phase === 'matchEnd') roundLabel.textContent = 'MATCH OVER';
+      }
     },
     setRound(round) {
       roundLabel.textContent = `ROUND ${round}`;
@@ -151,7 +180,10 @@ export function createHud() {
       aliveEl.textContent = text;
     },
     setObjective(site) {
-      objective.textContent = `Plant the ember charge at Site ${site} (or the other site). Eliminate Cinder or detonate the charge to win the round.`;
+      const text = `Plant the ember charge at Site ${site} — or the other site if it is covered. Eliminate Cinder or detonate the charge to win the round.`;
+      if (text === lastObjective) return;
+      lastObjective = text;
+      objective.textContent = text;
     },
     hitMarker(killed, holdMs = 90) {
       hitmarker.classList.add('on');
@@ -160,7 +192,7 @@ export function createHud() {
       hitTimer = setTimeout(() => {
         hitmarker.classList.remove('on');
         hitmarker.classList.remove('kill');
-      }, holdMs);
+      }, killed ? Math.max(holdMs, 220) : holdMs);
     },
     setCrosshairSpread(spread) {
       const gap = Math.round(3 + spread * 900);
@@ -172,9 +204,11 @@ export function createHud() {
       vignette.classList.add('on');
       setTimeout(() => vignette.classList.remove('on'), 140);
     },
-    addKillFeed(killer, victim, headshot, killerTeam, victimTeam) {
+    addKillFeed(killer, victim, headshot, killerTeam, victimTeam, viaFrag = false) {
       const div = document.createElement('div');
-      div.innerHTML = `<span class="${killerTeam}">${killer}</span> ${headshot ? '<span class="headshot">◉</span> ' : '✕ '}<span class="${victimTeam}">${victim}</span>`;
+      const glyph = viaFrag ? WEAPON_GLYPHS.frag : headshot ? WEAPON_GLYPHS.headshot : WEAPON_GLYPHS.gun;
+      div.innerHTML = `<span class="${killerTeam}">${killer}</span> <span class="glyph">${glyph}</span> <span class="${victimTeam}">${victim}</span>`;
+      if (headshot) div.classList.add('headshot-line');
       killfeed.prepend(div);
       while (killfeed.children.length > 5) killfeed.removeChild(killfeed.lastChild);
       setTimeout(() => div.remove(), 6000);
@@ -226,12 +260,14 @@ export function createHud() {
     showBuy(canBuy, owned, money) {
       buyMenu.classList.add('show');
       buyMoney.textContent = `$${money}`;
-      for (const { item, button } of buyButtons) {
+      for (const { item, button, tag } of buyButtons) {
         const isOwned = (item.kind === 'weapon' && owned[item.id]) || (item.kind === 'armor' && owned.kevlar);
-        button.disabled = !canBuy || money < item.price || isOwned;
-        const ownedTag = isOwned ? '<span class="owned">OWNED</span>' : `<span class="price">$${item.price}</span>`;
-        button.querySelector('.price, .owned')?.remove();
-        button.insertAdjacentHTML('beforeend', ownedTag);
+        const affordable = money >= item.price;
+        button.disabled = !canBuy || !affordable || isOwned;
+        button.classList.toggle('owned', Boolean(isOwned));
+        button.classList.toggle('poor', !isOwned && !affordable);
+        tag.textContent = isOwned ? 'OWNED' : `$${item.price}`;
+        tag.className = isOwned ? 'owned' : 'price';
       }
     },
     hideBuy() {

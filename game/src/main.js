@@ -4,7 +4,7 @@
 // ?shot=start|play|plant|end with &seed=N sets up a deterministic frame for a capture,
 // renders it twice, then freezes it and sets window.__shotReady.
 import * as THREE from 'three';
-import { PALETTE } from './palette.js';
+import { PALETTE, ATMOSPHERE } from './palette.js';
 import { createWorld } from './world.js';
 import { createInput } from './input.js';
 import { createBody, createMover } from './mover.js';
@@ -36,12 +36,18 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'hi
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+// Filmic tone mapping is what makes the dusk read as dusk: highlights from the furnace
+// and the lamps roll off instead of clipping to white, and the shadows keep their colour.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.5;
 document.getElementById('game').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x2a1d12);
-scene.fog = new THREE.Fog(new THREE.Color(0x2a1d12), 26, 62);
+// The sky dome in world.js paints the background; this colour only shows for the first
+// frames and matches the fog so the blend is invisible.
+scene.background = new THREE.Color(ATMOSPHERE.fog);
+scene.fog = new THREE.Fog(new THREE.Color(ATMOSPHERE.fog), ATMOSPHERE.fogNear, ATMOSPHERE.fogFar);
 const camera = new THREE.PerspectiveCamera(74, window.innerWidth / window.innerHeight, 0.05, 140);
 scene.add(camera);
 
@@ -477,7 +483,7 @@ function step(dt) {
         audio.step();
       }
     }
-    weapons.step(dt);
+    weapons.step(dt, mover.groundSpeed(playerBody));
     const bombState = { ...bomb.state, position: bomb.group.position };
     bots.step(dt, elapsed, player, bombState);
 
@@ -646,52 +652,89 @@ function runShot(name) {
   if (name === 'start') {
     playerBody.position.set(0.6, 0, 13.6);
     settle(20);
-    aimAt(new THREE.Vector3(-6, 2.2, -6));
+    // The menu shot looks straight down mid: lane lines, the kiln, the gantry lamp and
+    // the dusk sky stacked in one frame behind the title panel. The capture lightens
+    // the overlay's dim so the map sells itself behind the menu; the live game's menu
+    // keeps its heavier dim for readability.
+    aimAt(new THREE.Vector3(-0.5, 1.7, -8.6));
     hud.showOverlay('start');
+    document.getElementById('overlay').style.background = 'color-mix(in srgb, var(--canvas) 58%, transparent)';
     hud.setHint('');
   } else if (name === 'play') {
     weapons.give('vk7');
     weapons.equip('vk7');
     match.state.money = 2450;
-    playerBody.position.set(-8, 0, 0);
+    playerBody.position.set(-7.4, 0, 2);
     settle(20);
-    // One defender drops to a headshot down the clear west lane; the crosshair
-    // then sits on the next defender across mid.
-    const target = bots.bots.find((bot) => bot.team === 'cin' && bot.name === 'Ash');
-    if (target) {
-      target.body.position.set(-8, 0, -8);
-      target.mesh.group.position.set(-8, 0, -8);
-      aimAt(new THREE.Vector3(-8, 1.6, -8));
-      playerShoot(0);
-      settle(6);
+    // First blood already happened down this lane: Ash is down in the open (the kill
+    // feed tells that story), and the frozen frame is the NEXT shot — crosshair on Soot
+    // across mid, muzzle flash lit, tracer in the air, hitmarker up. A screenshot of a
+    // firefight, not of a pose.
+    const fallen = bots.bots.find((bot) => bot.team === 'cin' && bot.name === 'Ash');
+    if (fallen) {
+      fallen.alive = false;
+      fallen.health = 0;
+      fallen.fall = 1;
+      fallen.body.position.set(-7.4, 0, -8);
+      fallen.mesh.group.position.set(-7.4, 0, -8);
+      fallen.mesh.group.rotation.x = -1.45;
+      hud.addKillFeed('You', 'Ash', true, 'van', 'cin');
+      match.state.kills = 1;
     }
     const next = bots.bots.find((bot) => bot.team === 'cin' && bot.alive && bot.name === 'Soot');
     if (next) {
-      next.body.position.set(3.5, 0, -8);
-      next.mesh.group.position.set(3.5, 0, -8);
+      next.body.position.set(-7.4, 0, -12);
+      next.mesh.group.position.set(-7.4, 0, -12);
+      next.body.yaw = Math.atan2(-(playerBody.position.x - -7.4), -(playerBody.position.z - -12));
+      next.mesh.group.rotation.y = next.body.yaw;
     }
-    // Look back down the west lane at the fallen defender: the kill, the lane, Site A.
-    aimAt(new THREE.Vector3(-8, 1.0, -8));
+    const ally = bots.bots.find((bot) => bot.team === 'van' && bot.name === 'Kestrel');
+    if (ally) {
+      ally.body.position.set(-11, 0, -5);
+      ally.mesh.group.position.set(-11, 0, -5);
+      ally.body.yaw = Math.atan2(-(playerBody.position.x - -11), -(playerBody.position.z - -5));
+      ally.mesh.group.rotation.y = ally.body.yaw;
+    }
+    aimAt(new THREE.Vector3(-7.4, 1.2, -12));
+    // Fire the frozen shot LAST: no settle after it, so the flash, the kick and the
+    // tracer are all still alive when the frame is painted. step(0) syncs the flash
+    // mesh and light to the just-fired state without decaying anything.
+    playerShoot(0);
+    weapons.step(0);
     match.state.phaseTime = 62;
     hud.setTimer(62, 'live');
     hud.setHint('');
   } else if (name === 'plant') {
     weapons.give('vk7');
     weapons.equip('vk7');
-    playerBody.position.set(-11.5, 0, -7.5);
+    playerBody.position.set(-10.6, 0, -6.2);
     settle(20);
     bomb.place('A', new THREE.Vector3(-13, 0, -9.5));
     bomb.state.fuseLeft = 27;
     hud.setBombStatus('CHARGE PLANTED — detonates in 27s');
+    hud.setTimer(27, 'live');
     const defender = bots.bots.find((bot) => bot.team === 'cin' && bot.name === 'Ember');
     if (defender) {
-      defender.body.position.set(-11.5, 0, -10.5);
-      defender.mesh.group.position.set(-11.5, 0, -10.5);
+      defender.body.position.set(-12.6, 0, -12.6);
+      defender.mesh.group.position.set(-12.6, 0, -12.6);
+      defender.body.yaw = Math.atan2(-(playerBody.position.x - -12.6), -(playerBody.position.z - -12.6));
+      defender.mesh.group.rotation.y = defender.body.yaw;
+    }
+    // A second defender pushes in past the furnace mouth, backlit by its glow: the
+    // retake is coming and the screenshot says so.
+    const second = bots.bots.find((bot) => bot.team === 'cin' && bot.name === 'Flint');
+    if (second) {
+      second.body.position.set(-16.5, 0, -6.5);
+      second.mesh.group.position.set(-16.5, 0, -6.5);
+      second.body.yaw = Math.atan2(-(playerBody.position.x - -16.5), -(playerBody.position.z - -6.5));
+      second.mesh.group.rotation.y = second.body.yaw;
     }
     const ally = bots.bots.find((bot) => bot.team === 'van' && bot.name === 'Bram');
     if (ally) {
-      ally.body.position.set(-9, 0, -6);
-      ally.mesh.group.position.set(-9, 0, -6);
+      ally.body.position.set(-8.6, 0, -3.6);
+      ally.mesh.group.position.set(-8.6, 0, -3.6);
+      ally.body.yaw = Math.atan2(-(-13 - -8.6), -(-9.5 - -3.6));
+      ally.mesh.group.rotation.y = ally.body.yaw;
     }
     aimAt(new THREE.Vector3(-13, 0.5, -9.5));
     match.state.phaseTime = 27;

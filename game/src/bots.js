@@ -3,7 +3,9 @@
 // graph (breadth-first search over world.waypoints), sees through a field of view plus a
 // line-of-sight ray against the world, hears gunshots, fires in bursts with a reaction delay,
 // and retakes and defuses when the charge is planted. No bot knows the player's position
-// until it sees or hears something — the same information a human would have.
+// until it sees or hears something — the same information a human would have. The meshes
+// are dressed to read at range in dusk light: team-coloured armour with a glowing visor
+// slit, a chest stripe, pack and pouches — so a screenshot always shows who is who.
 import * as THREE from 'three';
 import { createBody } from './mover.js';
 import { PALETTE } from './palette.js';
@@ -67,27 +69,61 @@ function nearestNode(nodes, x, z) {
   return best;
 }
 
-function buildBotMesh(team) {
-  const color = team === 'van' ? PALETTE.ally : PALETTE.danger;
-  const bodyMaterial = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.6, metalness: 0.1 });
+// A bot figure, built to silhouette: armoured torso with a team chest stripe, shoulder
+// pauldrons, a helmet with a glowing visor slit (emissive, so it reads across the yard
+// at dusk), backpack, belt pouches, knee pads and a rifle held at the ready. Only the
+// torso and head carry hit data — the dressing is visual and never blocks a bullet the
+// hitboxes would have let through. `shadeShift` varies each bot's armour a touch so a
+// squad is seven people, not one clone seven times.
+function buildBotMesh(team, shadeShift) {
+  const teamColor = new THREE.Color(team === 'van' ? PALETTE.ally : PALETTE.danger);
+  teamColor.offsetHSL(0, 0, shadeShift);
+  const bodyMaterial = new THREE.MeshStandardMaterial({ color: teamColor, roughness: 0.55, metalness: 0.15 });
   const darkMaterial = new THREE.MeshStandardMaterial({ color: 0x2c2620, roughness: 0.8, metalness: 0.2 });
-  const headMaterial = new THREE.MeshStandardMaterial({ color: 0xc9a06a, roughness: 0.7, metalness: 0.05 });
+  const clothMaterial = new THREE.MeshStandardMaterial({ color: 0x3a342c, roughness: 0.95, metalness: 0.02 });
+  const headMaterial = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.7, metalness: 0.05 });
+  const visorMaterial = new THREE.MeshStandardMaterial({
+    color: teamColor, emissive: teamColor, emissiveIntensity: 1.8, roughness: 0.3, metalness: 0.1,
+  });
   const group = new THREE.Group();
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.72, 0.32), bodyMaterial);
-  torso.position.y = 1.08;
+  const part = (geometry, material, x, y, z) => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    group.add(mesh);
+    return mesh;
+  };
+  const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+  // Legs and boots, then knee pads so a crouched holder still reads as armoured.
+  const legL = part(box(0.2, 0.7, 0.22), clothMaterial, -0.14, 0.35, 0);
+  const legR = part(box(0.2, 0.7, 0.22), clothMaterial, 0.14, 0.35, 0);
+  part(box(0.21, 0.1, 0.3), darkMaterial, -0.14, 0.05, -0.03);
+  part(box(0.21, 0.1, 0.3), darkMaterial, 0.14, 0.05, -0.03);
+  part(box(0.22, 0.2, 0.05), darkMaterial, -0.14, 0.52, -0.12);
+  part(box(0.22, 0.2, 0.05), darkMaterial, 0.14, 0.52, -0.12);
+  // Torso: the hitbox part. Chest stripe and belt break up the slab; the pack rides behind.
+  const torso = part(box(0.56, 0.72, 0.32), bodyMaterial, 0, 1.08, 0);
   torso.userData.part = 'torso';
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 14, 10), headMaterial);
-  head.position.y = 1.6;
+  part(box(0.57, 0.12, 0.33), darkMaterial, 0, 1.3, 0);
+  part(box(0.57, 0.09, 0.33), visorMaterial, 0, 1.12, 0);
+  part(box(0.5, 0.08, 0.34), darkMaterial, 0, 0.74, 0);
+  part(box(0.4, 0.5, 0.16), darkMaterial, 0, 1.12, 0.24);
+  part(box(0.16, 0.2, 0.1), darkMaterial, -0.16, 0.68, -0.18);
+  part(box(0.16, 0.2, 0.1), darkMaterial, 0.16, 0.68, -0.18);
+  // Shoulders and arms angled down to the rifle.
+  part(box(0.18, 0.2, 0.24), bodyMaterial, -0.37, 1.36, 0);
+  part(box(0.18, 0.2, 0.24), bodyMaterial, 0.37, 1.36, 0);
+  part(box(0.13, 0.42, 0.15), clothMaterial, -0.38, 1.05, -0.06).rotation.x = -0.35;
+  part(box(0.13, 0.42, 0.15), clothMaterial, 0.38, 1.05, -0.06).rotation.x = -0.35;
+  // Head: the hitbox part — helmet shell, face, and the glowing visor slit facing -z.
+  const head = part(new THREE.SphereGeometry(0.17, 14, 10), headMaterial, 0, 1.6, 0);
   head.userData.part = 'head';
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.06, 0.05), darkMaterial);
-  visor.position.set(0, 1.62, -0.15);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 0.22), darkMaterial);
-  legL.position.set(-0.14, 0.35, 0);
-  const legR = legL.clone();
-  legR.position.x = 0.14;
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.62), darkMaterial);
-  gun.position.set(0.2, 1.12, -0.3);
-  group.add(torso, head, visor, legL, legR, gun);
+  part(new THREE.SphereGeometry(0.185, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), darkMaterial, 0, 1.63, 0);
+  part(box(0.27, 0.055, 0.05), visorMaterial, 0, 1.62, -0.155);
+  part(box(0.3, 0.04, 0.3), darkMaterial, 0, 1.76, 0);
+  // The rifle: receiver, barrel, magazine — long enough to read in silhouette.
+  part(box(0.07, 0.1, 0.66), darkMaterial, 0.2, 1.14, -0.32);
+  part(box(0.04, 0.04, 0.3), darkMaterial, 0.2, 1.16, -0.78);
+  part(box(0.05, 0.14, 0.07), darkMaterial, 0.2, 1.0, -0.3);
   group.traverse((mesh) => {
     if (mesh.isMesh) {
       mesh.castShadow = true;
@@ -106,7 +142,7 @@ export function createBots(scene, world, mover, shootables, random, hooks) {
   function spawn(team, name, spawnIndex, role) {
     const [x, z] = world.spawns[team][spawnIndex % world.spawns[team].length];
     const body = createBody(x, z, team === 'van' ? 0 : Math.PI);
-    const mesh = buildBotMesh(team);
+    const mesh = buildBotMesh(team, (random() - 0.5) * 0.07);
     mesh.group.position.set(x, 0, z);
     scene.add(mesh.group);
     mesh.torso.userData.bot = null;
@@ -311,7 +347,7 @@ export function createBots(scene, world, mover, shootables, random, hooks) {
     mover.step(bot.body, dt, wishX, wishZ, crouch, false);
     bot.mesh.group.position.copy(bot.body.position);
     bot.mesh.group.rotation.y = bot.body.yaw;
-    // Walk bob: the legs swing while the body moves.
+    // Walk bob: the legs swing while the body moves, and the arms settle the rifle.
     const speed = mover.groundSpeed(bot.body);
     bot.mesh.group.position.y = bot.body.position.y + Math.abs(Math.sin(now * 9)) * 0.03 * Math.min(1, speed / 4);
 
